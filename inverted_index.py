@@ -1,9 +1,14 @@
 #-------------------------------------------------------------------------
-# AUTHOR: your name
+# AUTHOR: Andrew Mazmanian
 # FILENAME: inverted_index.py
-# SPECIFICATION: description of the program
+# SPECIFICATION: maintains the documents and inverted_index collections of
+#                the assignment3 MongoDB database as documents are
+#                inserted, updated, and deleted. Each term's postings
+#                (docId, tf) are kept in sync with the documents, new
+#                terms are created, terms with no postings are removed,
+#                and both collections are printed at the end.
 # FOR: CS 4250 - Assignment #3
-# TIME SPENT: how long it took you to complete the assignment
+# TIME SPENT: 5 hours
 #-------------------------------------------------------------------------
 
 # Importing Python libraries
@@ -25,19 +30,21 @@ inverted_index = db["inverted_index"]
 def getTermFrequencies(text):
 
     # Converting text to lowercase
-    # --> add your Python code here
+    text = text.lower()
 
 
     # Removing punctuation
-    # --> add your Python code here
+    text = "".join(character for character in text if character.isalnum() or character.isspace())
 
 
     # Splitting the text into terms
-    # --> add your Python code here
+    terms = text.split()
 
 
     # Returning the term frequencies
-    # --> add your Python code here
+    termFrequencies = {}
+    for term in terms: termFrequencies[term] = termFrequencies.get(term, 0) + 1
+    return termFrequencies
 
 
 
@@ -48,16 +55,15 @@ def getTermFrequencies(text):
 def addPosting(term, docId, tf):
 
     # Searching for the term in the inverted index
-    # --> add your Python code here
+    termDocument = inverted_index.find_one({"term": term})
 
 
     # Creating a new term if it does not exist
-    # --> add your Python code here
+    if termDocument is None: inverted_index.insert_one({"term": term, "postings": [{"docId": docId, "tf": tf}]})
 
 
     # Adding a posting if the term already exists
-    # --> add your Python code here
-
+    else: inverted_index.update_one({"term": term}, {"$push": {"postings": {"docId": docId, "tf": tf}}})
 
 
 #-------------------------------------------------------------------------
@@ -68,15 +74,15 @@ def addPosting(term, docId, tf):
 def removePosting(term, docId):
 
     # Removing the posting from the term
-    # --> add your Python code here
+    inverted_index.update_one({"term": term}, {"$pull": {"postings": {"docId": docId}}})
 
 
     # Retrieving the term after removing the posting
-    # --> add your Python code here
+    termDocument = inverted_index.find_one({"term": term})
 
 
     # Deleting the term if its postings list is empty
-    # --> add your Python code here
+    if termDocument is not None and len(termDocument["postings"]) == 0: inverted_index.delete_one({"term": term})
 
 
 
@@ -87,16 +93,15 @@ def removePosting(term, docId):
 def insertDocument(document):
 
     # Inserting the document into the documents collection
-    # --> add your Python code here
+    documents.insert_one(document)
 
 
     # Obtaining the term frequencies
-    # --> add your Python code here
+    termFrequencies = getTermFrequencies(document["text"])
 
 
     # Updating the inverted index
-    # --> add your Python code here
-
+    for term, tf in termFrequencies.items(): addPosting(term, document["_id"], tf)
 
 
 #-------------------------------------------------------------------------
@@ -107,23 +112,30 @@ def insertDocument(document):
 def updateDocument(docId, newText):
 
     # Retrieving the current document
-    # --> add your Python code here
+    currentDocument = documents.find_one({"_id": docId})
 
 
     # Obtaining the old and new term frequencies
-    # --> add your Python code here
+    oldFrequencies = getTermFrequencies(currentDocument["text"])
+    newFrequencies = getTermFrequencies(newText)
 
 
     # Processing terms that existed in the old document
-    # --> add your Python code here
+    for term, oldTf in oldFrequencies.items():
+        if term not in newFrequencies: removePosting(term, docId) # term no longer occurs in the document: remove its posting
+        elif newFrequencies[term] != oldTf:
+            # term still occurs but with a different tf: replace its posting
+            inverted_index.update_one({"term": term}, {"$pull": {"postings": {"docId": docId}}})
+            inverted_index.update_one({"term": term}, {"$push": {"postings": {"docId": docId, "tf": newFrequencies[term]}}})
 
 
     # Processing terms that occur only in the new document
-    # --> add your Python code here
+    for term, newTf in newFrequencies.items():
+        if term not in oldFrequencies: addPosting(term, docId, newTf)
 
 
     # Updating the document text
-    # --> add your Python code here
+    documents.update_one({"_id": docId}, {"$set": {"text": newText}})
 
 
 
@@ -135,19 +147,19 @@ def updateDocument(docId, newText):
 def deleteDocument(docId):
 
     # Retrieving the document before deleting it
-    # --> add your Python code here
+    document = documents.find_one({"_id": docId})
 
 
     # Obtaining the terms contained in the document
-    # --> add your Python code here
+    terms = getTermFrequencies(document["text"])
 
 
     # Removing the document from every corresponding posting list
-    # --> add your Python code here
+    for term in terms: removePosting(term, docId)
 
 
     # Deleting the document
-    # --> add your Python code here
+    documents.delete_one({"_id": docId})
 
 
 
@@ -193,4 +205,8 @@ insertDocument(document3)
 deleteDocument(2)
 
 # Operation 6: print the content of the documents and inverted_index collections
-# --> add your Python code here
+print("documents:")
+for document in documents.find().sort("_id", 1): print(document)
+
+print("\ninverted_index:")
+for termDocument in inverted_index.find({}, {"_id": 0}).sort("term", 1): print(termDocument)
